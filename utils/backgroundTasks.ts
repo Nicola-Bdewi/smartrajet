@@ -3,13 +3,16 @@ import * as BackgroundFetch from 'expo-background-fetch';
 import * as turf from '@turf/turf';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import Constants from "expo-constants";
 
-const ENTRAVES_URL = process.env.ENTRAVES_URL;
-const IMPACTS_URL = process.env.IMPACTS_URL;
+const { IMPACTS_URL, ENTRAVES_URL, ORS_KEY } = Constants.expoConfig?.extra || {};
+
 const DISTANCE_LIMIT = 100;
 
-
 export function registerBackgroundTask() {
+    if (!ENTRAVES_URL || !IMPACTS_URL) {
+        throw new Error("Required environment variable ENTRAVES_URL or IMPACTS_URL or both is (are) missing.");
+    }
     TaskManager.defineTask('CHECK_CONSTRUCTIONS', async () => {
         const now = new Date();
         if (now.getHours() !== 8) {

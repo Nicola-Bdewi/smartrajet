@@ -14,28 +14,24 @@ import { saveAddress } from '@/services/addressService';
 import { useConstructionData } from '@/utils/useConstructionData';
 import { useAutocomplete } from '@/utils/useAutocomplete';
 import { useHtmlBuilder } from '@/utils/useHtmlBuilder';
-import {router, useRouter} from 'expo-router';
+import {useRouter} from 'expo-router';
 import {
     requestPermissions,
     configureNotificationHandler
 } from '@/utils/notifications';
 import { registerBackgroundTask } from '@/utils/backgroundTasks';
 import { styles } from '@/styles/styles';
-import { Suggestion } from '@/constants/types';
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Stack } from 'expo-router';
-import SavedAddressesScreen from "@/app/SavedAddressesScreen";
 import {initDb} from "@/utils/db";
 
 export default function MapScreen() {
     const { entraves, impacts } = useConstructionData();
-
     const [fromQuery, setFromQuery] = useState('');
     const [toQuery, setToQuery] = useState('');
     const [activeInput, setActiveInput] = useState<'from' | 'to' | null>(null);
     const [fromCoord, setFromCoord] = useState<[number, number] | null>(null);
     const [toCoord, setToCoord] = useState<[number, number] | null>(null);
     const [distanceThreshold, setDistanceThreshold] = useState(100); // meters
+    const router = useRouter();
 
     const suggestions = useAutocomplete(
         activeInput === 'from' ? fromQuery : toQuery,

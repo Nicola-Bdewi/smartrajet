@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
+import Constants from 'expo-constants';
 
-const ENTRAVES_URL =process.env.ENTRAVES_URL;
-const IMPACTS_URL =process.env.IMPACTS_URL;
 export function useConstructionData() {
     const [entraves, setEntraves] = useState<any[]>([]);
     const [impacts, setImpacts] = useState<any[]>([]);
+    const { IMPACTS_URL, ENTRAVES_URL, ORS_KEY } = Constants.expoConfig?.extra || {};
+
+    if (!ENTRAVES_URL || !IMPACTS_URL) {
+        throw new Error("Required environment variable ENTRAVES_URL or IMPACTS_URL or both is (are) missing.");
+    }
 
     useEffect(() => {
         (async () => {
