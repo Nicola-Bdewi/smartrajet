@@ -6,7 +6,7 @@ import {
     Text,
     TouchableOpacity,
     ActivityIndicator,
-    Button
+    SafeAreaView, Dimensions
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { WebView } from 'react-native-webview';
@@ -22,6 +22,13 @@ import {
 import { registerBackgroundTask } from '@/utils/backgroundTasks';
 import { styles } from '@/styles/styles';
 import {initDb} from "@/utils/db";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FAB, Provider as PaperProvider, Card, Button } from 'react-native-paper';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    withTiming,
+} from 'react-native-reanimated';
 
 export default function MapScreen() {
     const { entraves, impacts } = useConstructionData();
@@ -32,6 +39,10 @@ export default function MapScreen() {
     const [toCoord, setToCoord] = useState<[number, number] | null>(null);
     const [distanceThreshold, setDistanceThreshold] = useState(100); // meters
     const router = useRouter();
+    const insets = useSafeAreaInsets();
+    const [visible, setVisible] = useState(false);
+    const opacity = useSharedValue(0);
+    const translateY = useSharedValue(-20);
 
     const suggestions = useAutocomplete(
         activeInput === 'from' ? fromQuery : toQuery,
@@ -57,8 +68,45 @@ export default function MapScreen() {
         Map: undefined;
         SavedAddresses: undefined;
     };
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+        transform: [{ translateY: translateY.value }],
+    }));
+
+    const screenHeight = Dimensions.get('window').height;
+
+    const toggle = () => {
+        const toVisible = !visible;
+        setVisible(toVisible);
+        opacity.value = withTiming(toVisible ? 1 : 0, { duration: 300 });
+        translateY.value = withTiming(toVisible ? 0 : -20, { duration: 300 });
+    };
+
     return (
-        <View style={{ flex: 1 }}>
+        <PaperProvider>
+            <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+                <View style={styles.floatingButton}>
+                    <Button mode="contained" onPress={toggle} buttonColor="#1976D2" textColor="#ffffff">
+                        {visible ? 'Hide' : 'Show'}
+                    </Button>
+                </View>
+                {/* Map filling background with conditional ActivityIndicator */}
+                {loadingHtml ? (
+                    <ActivityIndicator style={{ flex: 1 }} size="large" color="#00ff00" />
+                ) : (
+                    <WebView originWhitelist={['*']} source={{ html }} style={{ flex: 1 }} />
+                )}
+                {/* Button to navigate to saved-addresses management */}
+                <View style={[styles.floatingBtnContainer, { bottom: insets.bottom + 10 }]}>
+                    <Button textColor="#1976D2" mode="outlined" onPress={() => router.push('/SavedAddressesScreen')}>
+                        Manage Saved Addresses
+                    </Button>
+                </View>
+                <Animated.View
+                    style={[{ flex: 1, width: '100%', position: 'absolute', height: screenHeight * 0.1,top: screenHeight * 0.05 }, animatedStyle]}
+                    pointerEvents={visible ? 'auto' : 'none'}
+                >
             <View style={styles.searchContainer}>
                 <TextInput
                     placeholder="From address"
@@ -70,12 +118,16 @@ export default function MapScreen() {
                     }}
                     style={styles.input}
                 />
-                {toCoord && (
-                    <Button
-                        title="Save this To"
-                        onPress={() => saveAddress(toQuery, toCoord)}
+                    <FAB
+                        icon="plus"
+                        size="small"
+                        color="white"
+                        style={styles.fab}
+                        onPress={() => {
+                            if (toCoord) saveAddress(toQuery, toCoord);
+                            else alert('Please select a valid From address');
+                        }}
                     />
-                )}
                 <TextInput
                     placeholder="To address"
                     value={toQuery}
@@ -86,18 +138,22 @@ export default function MapScreen() {
                     }}
                     style={styles.input}
                 />
-                {fromCoord && (
-                    <Button
-                        title="Save this From"
-                        onPress={() => saveAddress(fromQuery, fromCoord)}
+                    <FAB
+                        icon="plus"
+                        size="small"
+                        color="white"
+                        style={styles.fabTwo}
+                        onPress={() => {
+                            if (fromCoord) saveAddress(fromQuery, fromCoord);
+                            else alert('Please select a valid From address');
+                        }}
                     />
-                )}
-                <View style={{ paddingHorizontal: 20, paddingBottom: 10 }}>
+                <View style={styles.sliderContainer}>
                     <Text>Rayon d'affichage des entraves : {distanceThreshold} m</Text>
                     <Slider
                         minimumValue={50}
-                        maximumValue={500}
-                        step={10}
+                        maximumValue={600}
+                        step={5}
                         value={distanceThreshold}
                         onValueChange={setDistanceThreshold}
                     />
@@ -125,18 +181,11 @@ export default function MapScreen() {
                         )}
                     />
                 )}
-            </View>
 
-            {loadingHtml ? (
-                <ActivityIndicator style={{ flex: 1 }} size="large" />
-            ) : (
-                <WebView originWhitelist={['*']} source={{ html }} style={{ flex: 1 }} />
-            )}
-            {/* Button to navigate to saved-addresses management */}
-            <Button
-                title="Manage Saved Addresses"
-                onPress={() => router.push('/SavedAddressesScreen')}
-            />
-        </View>
+            </View>
+        </Animated.View>
+            </SafeAreaView>
+        </PaperProvider>
     );
 }
+

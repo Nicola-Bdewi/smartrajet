@@ -1,5 +1,8 @@
 // File: MapScreen/useHtmlBuilder.ts
-import { useEffect, useState } from 'react';
+import {useEffect, useState} from 'react';
+import Constants from 'expo-constants';
+
+const OPENROUTESERVICE_API = Constants?.expoConfig?.extra?.OPENROUTESERVICE_API;
 
 export function useHtmlBuilder({
                                    entraves,
@@ -7,13 +10,14 @@ export function useHtmlBuilder({
                                    fromCoord,
                                    toCoord,
                                    distanceThreshold
-                               }: {
-    entraves: any[],
-    impacts: any[],
-    fromCoord: [number, number] | null,
-    toCoord: [number, number] | null,
-    distanceThreshold: number
-}) {
+                                       }: {
+                                    entraves: any[],
+                                    impacts: any[],
+                                    fromCoord: [number, number] | null,
+                                    toCoord: [number, number] | null,
+                                    distanceThreshold: number
+                                })
+{
     const [html, setHtml] = useState('');
     const [loadingHtml, setLoadingHtml] = useState(true);
 
@@ -50,7 +54,8 @@ export function useHtmlBuilder({
             if (fromCoord && toCoord) {
                 try {
                     const r = await fetch(
-                        `https://api.openrouteservice.org/v2/directions/driving-car?api_key=5b3ce3597851110001cf6248f0026a659ea4487181781678091e0f14` +
+                        `https://api.openrouteservice.org/v2/directions/driving-car` +
+                        `?api_key=${OPENROUTESERVICE_API}` +
                         `&start=${fromCoord[0]},${fromCoord[1]}` +
                         `&end=${toCoord[0]},${toCoord[1]}` +
                         `&geometry_format=geojson`,
@@ -94,8 +99,8 @@ export function useHtmlBuilder({
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
     const defaultIcon = L.divIcon({ className: 'icon-emoji', html: '🔨', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
-    const sidewalkIcon = L.divIcon({ className: 'icon-emoji', html: '🔨', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
-    const busIcon = L.divIcon({ className: 'icon-emoji', html: '🔴', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
+    const sidewalkIcon = L.divIcon({ className: 'icon-emoji', html: '🚷', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
+    const busIcon = L.divIcon({ className: 'icon-emoji', html: '🚌', iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -12] });
 
     const routeCoords = ${routeJSON};
     let routeLine = null;
@@ -132,11 +137,10 @@ export function useHtmlBuilder({
   </script>
 </body>
 </html>`;
-
             setHtml(full);
             setLoadingHtml(false);
         })();
     }, [entraves, impacts, fromCoord, toCoord, distanceThreshold]);
 
-    return { html, loadingHtml };
+    return {html, loadingHtml};
 }
