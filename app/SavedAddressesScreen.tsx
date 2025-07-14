@@ -207,47 +207,32 @@ export default function ConstructionAnalysisScreen() {
         }
 
         // --- 3. Filter by Date Range ---
-        if (startDate || endDate) { // Apply date filter only if at least one date is chosen
-            // Normalize selected filter dates to start/end of day using the same logic as construction dates
+        if (startDate || endDate) {
             const filterStartDate = startDate ? startOfDay(startDate) : null;
-            const filterEndDate = endDate ? endOfDay(endDate) : null;
+            const filterEndDate = endDate ? startOfDay(endDate) : null; // also startOfDay to match exact day (ignore time)
 
             currentResults = currentResults.filter((entrave) => {
-                // Parse and normalize construction dates using our custom local parser
-                const constructionStartDate = startOfDay(parseYYYYMMDDAsLocalDate(entrave.duration_start_date) || new Date(0)); // Fallback to epoch if invalid
-                const constructionEndDate = endOfDay(parseYYYYMMDDAsLocalDate(entrave.duration_end_date) || new Date(0));   // Fallback to epoch if invalid
+                const constructionStartDate = startOfDay(parseYYYYMMDDAsLocalDate(entrave.duration_start_date) || new Date(0));
+                const constructionEndDate = startOfDay(parseYYYYMMDDAsLocalDate(entrave.duration_end_date) || new Date(0));
 
-                // If parsing resulted in invalid dates (due to bad data), exclude this entrave
                 if (!isValid(constructionStartDate) || !isValid(constructionEndDate)) {
-                    // console.warn(`Skipping entrave ${entrave.id} due to invalid construction dates: Start=${entrave.duration_start_date}, End=${entrave.duration_end_date}`);
                     return false;
                 }
 
-                // Scenario A: Both Start and End dates are selected by the user
-                if (filterStartDate && filterEndDate) {
-                    // Check for overlap:
-                    // The construction must start before or on the filter's end date
-                    // AND The construction must end after or on the filter's start date
-                    return (
-                        constructionStartDate <= filterEndDate &&
-                        constructionEndDate >= filterStartDate
-                    );
+                // Exact match for startDate if provided
+                if (filterStartDate && constructionStartDate.getTime() !== filterStartDate.getTime()) {
+                    return false;
                 }
-                // Scenario B: Only Start Date is selected by the user
-                else if (filterStartDate) {
-                    // Show constructions that are active on or after the filter's start date.
-                    // This means the construction's end date must be on or after the filter's start date.
-                    return constructionEndDate >= filterStartDate;
+
+                // Exact match for endDate if provided
+                if (filterEndDate && constructionEndDate.getTime() !== filterEndDate.getTime()) {
+                    return false;
                 }
-                // Scenario C: Only End Date is selected by the user
-                else if (filterEndDate) {
-                    // Show constructions that are active on or before the filter's end date.
-                    // This means the construction's start date must be on or before the filter's end date.
-                    return constructionStartDate <= filterEndDate;
-                }
-                return true; // Should not technically be reached if startDate or endDate is null, but safe fallback
+
+                return true;
             });
         }
+
 
         setFilteredEntraves(currentResults);
         setHasFiltered(true); // Mark that filters have been applied

@@ -258,7 +258,9 @@ export function useHtmlBuilder({
 
       // Function to format ISO dates
       function fmtDate(iso) {
-        return iso ? iso.split('T')[0] : '—';
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? '—' : d.toISOString().split('T')[0];
       }
 
       // Popup content with detailed information
@@ -268,7 +270,7 @@ export function useHtmlBuilder({
         '🆔 Permit: ' + (c.permitId || 'N/A') + ' (' + (c.status || 'N/A') + ')<br/>' +
         '📅 Dates: ' + fmtDate(c.startDate) + ' → ' + fmtDate(c.endDate) + '<br/>' +
         '🏢 Org: ' + (c.org || 'N/A') + '<br/>' +
-        '📍 Rue: ' + (c.street || 'N/A');
+        '🛣️ Rue: ' + (c.street || 'N/A');
 
       L.marker([c.lat, c.lon], { icon: customIcon }).bindPopup(popup).addTo(map);
     });
