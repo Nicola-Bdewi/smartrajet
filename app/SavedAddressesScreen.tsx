@@ -10,12 +10,21 @@ import {
     TouchableOpacity,
     KeyboardAvoidingView,
     Platform,
+    Alert, // Used for user feedback
 } from 'react-native';
 import DropDownPicker from 'react-native-dropdown-picker';
 import Constants from 'expo-constants';
-import { format, parseISO, differenceInDays, getDay, isWithinInterval, subMonths } from 'date-fns';
+import {
+    format,
+    parseISO,
+    differenceInDays,
+    startOfDay, // For normalizing dates to the beginning of the day
+    endOfDay,   // For normalizing dates to the end of the day
+    isValid,    // To check if a date object is valid
+} from 'date-fns';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 
+// --- Interfaces ---
 interface Entrave {
     _id: number;
     id: string;
@@ -23,70 +32,141 @@ interface Entrave {
     boroughid: string;
     permitcategory: string;
     currentstatus: string;
-    duration_start_date: string;
-    duration_end_date: string;
+    duration_start_date: string; // Expected format: "YYYY-MM-DD" (e.g., "2025-07-15")
+    duration_end_date: string;   // Expected format: "YYYY-MM-DD"
     reason_category: string;
     occupancy_name: string;
     organizationname: string;
 }
 
+// --- Custom Hooks ---
+
+/**
+ * Debounces a value, returning the value only after a specified delay.
+ * Useful for delaying reactions to user input (like search text).
+ */
+function useDebouncedValue<T>(value: T, delay: number): T {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+
+    useEffect(() => {
+        const handler = setTimeout(() => setDebouncedValue(value), delay);
+        return () => clearTimeout(handler);
+    }, [value, delay]);
+
+    return debouncedValue;
+}
+
+/**
+ * Fetches construction data from the configured API URL.
+ */
 function useConstructionData() {
     const [entraves, setEntraves] = useState<Entrave[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    // Access ENTRAVES_URL from your app.config.js or app.json's "extra" section
     const { ENTRAVES_URL } = Constants.expoConfig?.extra || {};
 
     useEffect(() => {
         if (!ENTRAVES_URL) {
-            console.warn('ENTRAVES_URL missing in env');
+            console.warn('ENTRAVES_URL is missing in app.config.js "extra" section.');
+            setError('Configuration Error: API URL is not defined.');
             setLoading(false);
             return;
         }
-        (async () => {
+
+        const fetchEntraves = async () => {
+            setLoading(true);
+            setError(null); // Clear any previous errors
+
             try {
                 const res = await fetch(ENTRAVES_URL);
+                if (!res.ok) { // Check for HTTP errors (e.g., 404, 500)
+                    throw new Error(`HTTP error! Status: ${res.status}`);
+                }
                 const json = await res.json();
-                setEntraves(json.result.records as Entrave[]);
-            } catch (err) {
-                console.warn('Error loading entraves', err);
+                // Basic validation of the API response structure
+                if (json.result && Array.isArray(json.result.records)) {
+                    setEntraves(json.result.records as Entrave[]);
+                } else {
+                    throw new Error('Invalid data structure received from API.');
+                }
+            } catch (err: any) {
+                console.error('Error loading entraves:', err);
+                setError(`Failed to load data: ${err.message || 'Unknown error'}`);
             } finally {
                 setLoading(false);
             }
-        })();
+        };
+
+        fetchEntraves();
+        // Depend on ENTRAVES_URL to refetch if the URL ever changes (unlikely in production)
     }, [ENTRAVES_URL]);
 
-    return { entraves, loading };
+    return { entraves, loading, error };
 }
 
-const dayNames = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+// --- Helper Function for Robust Date Parsing ---
+/**
+ * Parses a "YYYY-MM-DD" string into a Date object, treating it as a local date
+ * to avoid timezone conversion issues that parseISO can sometimes introduce
+ * when no time or timezone information is present in the string.
+ * This ensures consistency with dates picked from DateTimePickerModal.
+ */
+const parseYYYYMMDDAsLocalDate = (dateString: string): Date | null => {
+    if (!dateString || typeof dateString !== 'string') {
+        return null;
+    }
+    const parts = dateString.split('-'); // e.g., ["2025", "07", "15"]
+    if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed (January is 0)
+        const day = parseInt(parts[2], 10);
 
+        // Create a new Date object directly using the local time constructor.
+        // This sets the time to 00:00:00 of that day in the local timezone.
+        const date = new Date(year, month, day);
+
+        // Basic validation: Check if the constructed date matches the input parts
+        // to catch cases like new Date(2025, 1, 30) where Feb only has 28 days
+        if (isValid(date) && date.getFullYear() === year && date.getMonth() === month && date.getDate() === day) {
+            return date;
+        }
+    }
+    // Fallback for unexpected formats or if manual parsing fails
+    const fallbackDate = parseISO(dateString);
+    return isValid(fallbackDate) ? fallbackDate : null;
+};
+
+
+// --- Main Construction Analysis Screen Component ---
 export default function ConstructionAnalysisScreen() {
-    const { entraves, loading } = useConstructionData();
+    const { entraves, loading, error } = useConstructionData();
 
-    // Filters
+    // State for Borough Dropdown
     const [boroughOpen, setBoroughOpen] = useState(false);
     const [boroughValue, setBoroughValue] = useState<string | null>(null);
     const [boroughItems, setBoroughItems] = useState<{ label: string; value: string }[]>([]);
 
+    // State for Search Text Input
     const [searchText, setSearchText] = useState('');
+    const debouncedSearchText = useDebouncedValue(searchText, 300); // Debounce search input for performance
+
+    // State for Date Pickers
     const [startDate, setStartDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
-
-    // Date picker visibility
     const [isStartDatePickerVisible, setStartDatePickerVisible] = useState(false);
     const [isEndDatePickerVisible, setEndDatePickerVisible] = useState(false);
 
-    // Filter results & flag
+    // State for Filtered Results and Filter Status
     const [filteredEntraves, setFilteredEntraves] = useState<Entrave[]>([]);
-    const [hasFiltered, setHasFiltered] = useState(false);
+    const [hasFiltered, setHasFiltered] = useState(false); // Indicates if filters have been applied at least once
 
-    // Setup borough items once data loaded
+    // Effect to populate Borough Dropdown items once data is loaded
     useEffect(() => {
         if (!loading && entraves.length > 0) {
             const boroughSet = new Set<string>();
             entraves.forEach((e) => {
-                if (e.boroughid) {
-                    boroughSet.add(e.boroughid.trim());
-                }
+                if (e.boroughid) boroughSet.add(e.boroughid.trim());
             });
             const boroughList = Array.from(boroughSet)
                 .sort()
@@ -95,410 +175,488 @@ export default function ConstructionAnalysisScreen() {
         }
     }, [loading, entraves]);
 
-    const applyFilters = () => {
-        if (!boroughValue && !searchText.trim() && !startDate && !endDate) {
-            alert('Veuillez sélectionner au moins un filtre.');
+    /**
+     * Applies all selected filters to the entraves data.
+     */
+    const applyFilters = useCallback(() => {
+        // User feedback if no filters are selected
+        if (!boroughValue && !debouncedSearchText.trim() && !startDate && !endDate) {
+            Alert.alert(
+                'Aucun filtre sélectionné',
+                'Veuillez sélectionner au moins un critère de filtre pour lancer la recherche.',
+                [{ text: 'OK' }]
+            );
             return;
         }
 
-        let results = entraves;
+        let currentResults = entraves; // Start with the full, unfiltered dataset
 
+        // --- 1. Filter by Borough ---
         if (boroughValue) {
-            results = results.filter((e) => e.boroughid.trim() === boroughValue);
+            currentResults = currentResults.filter((e) => e.boroughid?.trim() === boroughValue);
         }
 
-        if (searchText.trim()) {
-            const searchLower = searchText.toLowerCase();
-            results = results.filter(
+        // --- 2. Filter by Search Text (Occupancy Name or Organization Name) ---
+        if (debouncedSearchText.trim()) {
+            const searchLower = debouncedSearchText.toLowerCase();
+            currentResults = currentResults.filter(
                 (e) =>
-                    e.occupancy_name.toLowerCase().includes(searchLower) ||
-                    e.organizationname.toLowerCase().includes(searchLower)
+                    e.occupancy_name?.toLowerCase().includes(searchLower) ||
+                    e.organizationname?.toLowerCase().includes(searchLower)
             );
         }
 
-        if (startDate) {
-            results = results.filter(
-                (e) => new Date(e.duration_end_date) >= startDate
-            );
+        // --- 3. Filter by Date Range ---
+        if (startDate || endDate) { // Apply date filter only if at least one date is chosen
+            // Normalize selected filter dates to start/end of day using the same logic as construction dates
+            const filterStartDate = startDate ? startOfDay(startDate) : null;
+            const filterEndDate = endDate ? endOfDay(endDate) : null;
+
+            currentResults = currentResults.filter((entrave) => {
+                // Parse and normalize construction dates using our custom local parser
+                const constructionStartDate = startOfDay(parseYYYYMMDDAsLocalDate(entrave.duration_start_date) || new Date(0)); // Fallback to epoch if invalid
+                const constructionEndDate = endOfDay(parseYYYYMMDDAsLocalDate(entrave.duration_end_date) || new Date(0));   // Fallback to epoch if invalid
+
+                // If parsing resulted in invalid dates (due to bad data), exclude this entrave
+                if (!isValid(constructionStartDate) || !isValid(constructionEndDate)) {
+                    // console.warn(`Skipping entrave ${entrave.id} due to invalid construction dates: Start=${entrave.duration_start_date}, End=${entrave.duration_end_date}`);
+                    return false;
+                }
+
+                // Scenario A: Both Start and End dates are selected by the user
+                if (filterStartDate && filterEndDate) {
+                    // Check for overlap:
+                    // The construction must start before or on the filter's end date
+                    // AND The construction must end after or on the filter's start date
+                    return (
+                        constructionStartDate <= filterEndDate &&
+                        constructionEndDate >= filterStartDate
+                    );
+                }
+                // Scenario B: Only Start Date is selected by the user
+                else if (filterStartDate) {
+                    // Show constructions that are active on or after the filter's start date.
+                    // This means the construction's end date must be on or after the filter's start date.
+                    return constructionEndDate >= filterStartDate;
+                }
+                // Scenario C: Only End Date is selected by the user
+                else if (filterEndDate) {
+                    // Show constructions that are active on or before the filter's end date.
+                    // This means the construction's start date must be on or before the filter's end date.
+                    return constructionStartDate <= filterEndDate;
+                }
+                return true; // Should not technically be reached if startDate or endDate is null, but safe fallback
+            });
         }
 
-        if (endDate) {
-            results = results.filter(
-                (e) => new Date(e.duration_start_date) <= endDate
-            );
-        }
+        setFilteredEntraves(currentResults);
+        setHasFiltered(true); // Mark that filters have been applied
+    }, [entraves, boroughValue, debouncedSearchText, startDate, endDate]); // Dependencies for useCallback
 
-        setFilteredEntraves(results);
-        setHasFiltered(true);
-    };
-
-    const clearFilters = () => {
+    /**
+     * Clears all filter selections and resets the displayed results.
+     */
+    const clearFilters = useCallback(() => {
         setBoroughValue(null);
         setSearchText('');
         setStartDate(null);
         setEndDate(null);
-        setFilteredEntraves([]);
-        setHasFiltered(false);
-    };
+        setFilteredEntraves([]); // Clear filtered results display
+        setHasFiltered(false); // Reset filter status
+    }, []);
 
-    // Analysis computations
+    // --- Statistics Calculations (memoized for performance) ---
 
+    // Total number of filtered entraves
     const totalEntraves = filteredEntraves.length;
 
-    // Average duration days
-    const averageDuration =
-        totalEntraves === 0
-            ? 0
-            : (
-                filteredEntraves.reduce((acc, cur) => {
-                    const start = new Date(cur.duration_start_date);
-                    const end = new Date(cur.duration_end_date);
-                    return acc + differenceInDays(end, start);
-                }, 0) / totalEntraves
-            ).toFixed(1);
+    // Average duration of filtered entraves
+    const averageDuration = useCallback(() => {
+        if (totalEntraves === 0) return 0;
+        const totalDays = filteredEntraves.reduce((acc, cur) => {
+            const start = parseYYYYMMDDAsLocalDate(cur.duration_start_date);
+            const end = parseYYYYMMDDAsLocalDate(cur.duration_end_date);
+            if (start && end && isValid(start) && isValid(end)) {
+                return acc + differenceInDays(end, start);
+            }
+            return acc; // Skip entraves with invalid dates in duration calculation
+        }, 0);
+        return (totalDays / totalEntraves).toFixed(1);
+    }, [filteredEntraves, totalEntraves]);
 
-    // Top 5 boroughs by count
-    const boroughCounts: Record<string, number> = {};
-    filteredEntraves.forEach((e) => {
-        const b = e.boroughid.trim() || 'Inconnu';
-        boroughCounts[b] = (boroughCounts[b] || 0) + 1;
-    });
-    const topBoroughs = Object.entries(boroughCounts)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5);
+    // Top 5 boroughs by number of entraves in the filtered results
+    const topBoroughs = useCallback(() => {
+        const boroughCounts: Record<string, number> = {};
+        filteredEntraves.forEach((e) => {
+            const b = e.boroughid?.trim() || 'Inconnu'; // Handle potentially missing boroughid
+            boroughCounts[b] = (boroughCounts[b] || 0) + 1;
+        });
+        return Object.entries(boroughCounts)
+            .sort(([, a], [, b]) => b - a) // Sort descending by count
+            .slice(0, 5); // Take top 5
+    }, [filteredEntraves]);
 
-    // Longest entrave(s)
-    let maxDuration = 0;
-    let longestEntraves: Entrave[] = [];
-    filteredEntraves.forEach((e) => {
-        const start = new Date(e.duration_start_date);
-        const end = new Date(e.duration_end_date);
-        const dur = differenceInDays(end, start);
-        if (dur > maxDuration) {
-            maxDuration = dur;
-            longestEntraves = [e];
-        } else if (dur === maxDuration) {
-            longestEntraves.push(e);
-        }
-    });
-
-    // Most frequent occupancy name
-    const occupancyCounts: Record<string, number> = {};
-    filteredEntraves.forEach((e) => {
-        const occ = e.occupancy_name.trim() || 'Inconnu';
-        occupancyCounts[occ] = (occupancyCounts[occ] || 0) + 1;
-    });
-    const maxOccCount = Math.max(...Object.values(occupancyCounts), 0);
-    const mostFrequentOccupancies = Object.entries(occupancyCounts)
-        .filter(([, count]) => count === maxOccCount)
-        .map(([name]) => name);
-
-    // Entraves active today (today between start and end)
-    const today = new Date();
-    const activeEntravesCount = filteredEntraves.filter((e) =>
-        isWithinInterval(today, {
-            start: new Date(e.duration_start_date),
-            end: new Date(e.duration_end_date),
-        })
-    ).length;
-    const activePercentage =
-        totalEntraves === 0 ? 0 : ((activeEntravesCount / totalEntraves) * 100).toFixed(1);
-
-    // Entrave count per month for last 6 months (by start date)
-    const last6Months = Array.from({ length: 6 }).map((_, i) => {
-        const d = subMonths(today, i);
-        return format(d, 'yyyy-MM');
-    }).reverse();
-
-    const monthCounts: Record<string, number> = {};
-    filteredEntraves.forEach((e) => {
-        try {
-            const month = format(new Date(e.duration_start_date), 'yyyy-MM');
-            monthCounts[month] = (monthCounts[month] || 0) + 1;
-        } catch {
-            // ignore invalid dates
-        }
-    });
-
-    // Entrave counts per weekday (start date)
-    const weekdayCounts: Record<string, number> = {};
-    filteredEntraves.forEach((e) => {
-        try {
-            const dayIndex = getDay(new Date(e.duration_start_date));
-            const dayName = dayNames[dayIndex];
-            weekdayCounts[dayName] = (weekdayCounts[dayName] || 0) + 1;
-        } catch {}
-    });
-
-    // Sort weekdays descending by count
-    const sortedWeekdays = Object.entries(weekdayCounts).sort(([, a], [, b]) => b - a);
-
-    // Render filters + analysis + list as FlatList
-    // ListHeaderComponent contains filters + analysis summary
-
-    const renderHeader = () => (
-        <View>
-            <Text style={styles.title}>Filtres</Text>
-            <View style={{ padding: 16 }}>
-            <DropDownPicker
-                open={boroughOpen}
-                value={boroughValue}
-                items={boroughItems}
-                setOpen={setBoroughOpen}
-                setValue={setBoroughValue}
-                setItems={setBoroughItems}
-                placeholder="Sélectionnez un arrondissement"
-                style={styles.dropdown}
-                containerStyle={{ marginHorizontal: 15 }}
-                searchable={true}
-                searchPlaceholder="Rechercher un arrondissement..."
-            />
-            </View>
-
-            <TextInput
-                style={styles.input}
-                placeholder="Recherche par nom d'occupation ou organisation"
-                value={searchText}
-                onChangeText={setSearchText}
-            />
-
-            <View style={styles.dateRow}>
-                <TouchableOpacity
-                    style={styles.datePickerButton}
-                    onPress={() => setStartDatePickerVisible(true)}
-                >
-                    <Text style={styles.datePickerText}>
-                        {startDate ? format(startDate, 'dd/MM/yyyy') : 'Date de début'}
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={styles.datePickerButton}
-                    onPress={() => setEndDatePickerVisible(true)}
-                >
-                    <Text style={styles.datePickerText}>
-                        {endDate ? format(endDate, 'dd/MM/yyyy') : 'Date de fin'}
-                    </Text>
-                </TouchableOpacity>
-            </View>
-
-            <View style={styles.buttonsRow}>
-                <TouchableOpacity style={styles.button} onPress={applyFilters}>
-                    <Text style={styles.buttonText}>Appliquer les filtres</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.button, styles.clearButton]}
-                    onPress={clearFilters}
-                >
-                    <Text style={[styles.buttonText, { color: '#333' }]}>Effacer</Text>
-                </TouchableOpacity>
-            </View>
-
-            {hasFiltered && (
-                <>
-                    <Text style={styles.statsTitle}>Analyse des travaux filtrés</Text>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Nombre total de travaux filtrés:</Text>
-                        <Text style={styles.statValue}>{totalEntraves}</Text>
-                        <Text style={styles.statExplanation}>
-                            Nombre d'entraves correspondant aux critères choisis.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Durée moyenne des travaux (en jours):</Text>
-                        <Text style={styles.statValue}>{averageDuration}</Text>
-                        <Text style={styles.statExplanation}>
-                            Durée moyenne entre début et fin des travaux.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Top 5 des arrondissements les plus affectés:</Text>
-                        {topBoroughs.map(([borough, count]) => (
-                            <Text key={borough} style={styles.statValue}>
-                                {borough}: {count}
-                            </Text>
-                        ))}
-                        <Text style={styles.statExplanation}>
-                            Arrondissements avec le plus grand nombre de travaux filtrés.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Entrave(s) la plus longue (en jours):</Text>
-                        <Text style={styles.statValue}>{maxDuration}</Text>
-                        {longestEntraves.map((e) => (
-                            <Text key={e.id} style={styles.statValue}>
-                                {e.occupancy_name} ({format(new Date(e.duration_start_date), 'dd/MM/yyyy')} -{' '}
-                                {format(new Date(e.duration_end_date), 'dd/MM/yyyy')})
-                            </Text>
-                        ))}
-                        <Text style={styles.statExplanation}>
-                            Travaux avec la plus longue durée entre début et fin.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Occupation la plus fréquente:</Text>
-                        {mostFrequentOccupancies.map((name) => (
-                            <Text key={name} style={styles.statValue}>
-                                {name} ({occupancyCounts[name]} fois)
-                            </Text>
-                        ))}
-                        <Text style={styles.statExplanation}>
-                            Nom d'occupation apparaissant le plus dans les travaux filtrés.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Pourcentage de travaux actifs aujourd'hui:</Text>
-                        <Text style={styles.statValue}>{activePercentage} %</Text>
-                        <Text style={styles.statExplanation}>
-                            Travaux dont la date actuelle est comprise entre début et fin.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Travaux démarrés par mois (6 derniers mois):</Text>
-                        {last6Months.map((month) => (
-                            <Text key={month} style={styles.statValue}>
-                                {month}: {monthCounts[month] || 0}
-                            </Text>
-                        ))}
-                        <Text style={styles.statExplanation}>
-                            Nombre de travaux démarrés chaque mois.
-                        </Text>
-                    </View>
-
-                    <View style={styles.statBox}>
-                        <Text style={styles.statLabel}>Répartition des travaux par jour de la semaine (démarrage):</Text>
-                        {sortedWeekdays.length === 0 ? (
-                            <Text style={styles.statValue}>Données non disponibles</Text>
-                        ) : (
-                            sortedWeekdays.map(([day, count]) => (
-                                <Text key={day} style={styles.statValue}>
-                                    {day}: {count}
-                                </Text>
-                            ))
-                        )}
-                        <Text style={styles.statExplanation}>
-                            Jours où le plus de travaux ont commencé.
-                        </Text>
-                    </View>
-                </>
-            )}
-        </View>
-    );
-
+    // --- Conditional Rendering for Loading/Error States ---
     if (loading) {
         return (
             <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" style={{ marginTop: 50 }} />
+                <ActivityIndicator size="large" color="#1976D2" />
+                <Text style={styles.loadingText}>Chargement des données...</Text>
             </SafeAreaView>
         );
     }
 
+    if (error) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <Text style={styles.errorText}>Erreur: {error}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={useConstructionData}>
+                    <Text style={styles.buttonText}>Réessayer</Text>
+                </TouchableOpacity>
+            </SafeAreaView>
+        );
+    }
+
+    // --- Main Component Render ---
     return (
         <SafeAreaView style={styles.container}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                style={{ flex: 1 }}
+                style={styles.keyboardAvoidingView}
             >
-                <FlatList
-                    data={filteredEntraves}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                        <View style={styles.entraveItem}>
-                            <Text style={styles.entraveTitle}>
-                                {item.occupancy_name} — {item.organizationname}
-                            </Text>
-                            <Text style={styles.entraveDetails}>Arrondissement: {item.boroughid}</Text>
-                            <Text style={styles.entraveDetails}>
-                                Dates: {format(new Date(item.duration_start_date), 'dd/MM/yyyy')} -{' '}
-                                {format(new Date(item.duration_end_date), 'dd/MM/yyyy')}
-                            </Text>
-                            <Text style={styles.entraveDetails}>Raison: {item.reason_category}</Text>
-                        </View>
-                    )}
-                    ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-                    ListHeaderComponent={renderHeader}
-                    contentContainerStyle={{ paddingBottom: 40 }}
-                    ListEmptyComponent={
-                        hasFiltered ? (
-                            <Text style={styles.noResultsText}>Aucun travail trouvé avec ces filtres.</Text>
-                        ) : (
-                            <Text style={styles.noResultsText}>
-                                Utilisez les filtres ci-dessus pour rechercher des travaux.
-                            </Text>
-                        )
-                    }
+                <Text style={styles.title}>Filtrer les travaux de construction</Text>
+
+                {/* Borough Dropdown Picker */}
+                <DropDownPicker
+                    open={boroughOpen}
+                    value={boroughValue}
+                    items={boroughItems}
+                    setOpen={setBoroughOpen}
+                    setValue={setBoroughValue}
+                    setItems={setBoroughItems}
+                    placeholder="Sélectionnez un arrondissement"
+                    searchable
+                    searchPlaceholder="Chercher un arrondissement..."
+                    style={styles.dropdown}
+                    dropDownContainerStyle={styles.dropdownContainer}
+                    listMode="MODAL" // Using modal for better user experience on mobile for large lists
+                    modalTitle="Choisissez un arrondissement"
+                    zIndex={3000} // Ensures dropdown appears above other content
+                    zIndexInverse={1000}
                 />
+
+                {/* Search Text Input */}
+                <TextInput
+                    style={styles.input}
+                    placeholder="Rechercher par nom d'occupation ou organisation"
+                    value={searchText}
+                    onChangeText={setSearchText}
+                    returnKeyType="search"
+                    blurOnSubmit
+                />
+
+                {/* Date Picker Buttons */}
+                <View style={styles.dateRow}>
+                    <TouchableOpacity
+                        style={styles.datePickerButton}
+                        onPress={() => setStartDatePickerVisible(true)}
+                    >
+                        <Text style={styles.datePickerText}>
+                            {startDate ? `Début: ${format(startDate, 'dd/MM/yyyy')}` : 'Date début'}
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.datePickerButton}
+                        onPress={() => setEndDatePickerVisible(true)}
+                    >
+                        <Text style={styles.datePickerText}>
+                            {endDate ? `Fin: ${format(endDate, 'dd/MM/yyyy')}` : 'Date fin'}
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Start Date Picker Modal */}
+                <DateTimePickerModal
+                    isVisible={isStartDatePickerVisible}
+                    mode="date"
+                    onConfirm={(date) => {
+                        setStartDate(date);
+                        setStartDatePickerVisible(false);
+                    }}
+                    onCancel={() => setStartDatePickerVisible(false)}
+                    // Prevents selecting a start date after the currently selected end date
+                    maximumDate={endDate || undefined}
+                />
+
+                {/* End Date Picker Modal */}
+                <DateTimePickerModal
+                    isVisible={isEndDatePickerVisible}
+                    mode="date"
+                    onConfirm={(date) => {
+                        setEndDate(date);
+                        setEndDatePickerVisible(false);
+                    }}
+                    onCancel={() => setEndDatePickerVisible(false)}
+                    // Prevents selecting an end date before the currently selected start date
+                    minimumDate={startDate || undefined}
+                    // Typically, you wouldn't pick an end date beyond today for past/current events
+                    maximumDate={new Date()}
+                />
+
+                {/* Action Buttons: Apply Filters and Clear Filters */}
+                <View style={styles.buttonsRow}>
+                    <TouchableOpacity style={styles.button} onPress={applyFilters}>
+                        <Text style={styles.buttonText}>Appliquer les filtres</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.button, styles.clearButton]}
+                        onPress={clearFilters}
+                    >
+                        <Text style={[styles.buttonText, { color: '#1976D2' }]}>Réinitialiser</Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Filtered Results Display Area */}
+                {hasFiltered ? (
+                    <FlatList
+                        ListHeaderComponent={
+                            <>
+                                <Text style={styles.statsTitle}>Statistiques des résultats</Text>
+
+                                {totalEntraves === 0 ? (
+                                    <Text style={styles.noResultsText}>
+                                        Aucun résultat ne correspond aux critères sélectionnés.
+                                    </Text>
+                                ) : (
+                                    <>
+                                        <View style={styles.statBox}>
+                                            <Text style={styles.statLabel}>Nombre total de travaux actifs:</Text>
+                                            <Text style={styles.statValue}>{totalEntraves}</Text>
+                                        </View>
+
+                                        <View style={styles.statBox}>
+                                            <Text style={styles.statLabel}>Durée moyenne (en jours):</Text>
+                                            <Text style={styles.statValue}>{averageDuration()}</Text>
+                                        </View>
+
+                                        <View style={styles.statBox}>
+                                            <Text style={styles.statLabel}>Top 5 des arrondissements:</Text>
+                                            {topBoroughs().map(([borough, count]) => (
+                                                <Text key={borough} style={styles.topBoroughItem}>{borough}: {count}</Text>
+                                            ))}
+                                        </View>
+
+                                        <Text style={styles.listTitle}>Liste des travaux filtrés:</Text>
+                                    </>
+                                )}
+                            </>
+                        }
+                        data={filteredEntraves}
+                        // Ensure keyExtractor returns a unique string
+                        keyExtractor={(item) => item.id.toString()}
+                        renderItem={({ item }) => (
+                            <View style={styles.entraveItem}>
+                                <Text style={styles.entraveTitle}>
+                                    {item.occupancy_name || 'N/A'} - {item.organizationname || 'N/A'}
+                                </Text>
+                                <Text>Arrondissement: {item.boroughid || 'N/A'}</Text>
+                                <Text>
+                                    {/* Format dates for display, using the same parsing logic */}
+                                    {parseYYYYMMDDAsLocalDate(item.duration_start_date) ? format(parseYYYYMMDDAsLocalDate(item.duration_start_date)!, 'dd/MM/yyyy') : 'Date début invalide'} -
+                                    {parseYYYYMMDDAsLocalDate(item.duration_end_date) ? format(parseYYYYMMDDAsLocalDate(item.duration_end_date)!, 'dd/MM/yyyy') : 'Date fin invalide'}
+                                </Text>
+                                <Text>Statut: {item.currentstatus || 'N/A'}</Text>
+                                <Text>Catégorie: {item.permitcategory || 'N/A'}</Text>
+                            </View>
+                        )}
+                        // Center content if no results
+                        contentContainerStyle={totalEntraves === 0 ? { flexGrow: 1, justifyContent: 'center' } : {}}
+                    />
+                ) : (
+                    <Text style={styles.promptText}>
+                        Veuillez appliquer des filtres pour voir les résultats.
+                    </Text>
+                )}
             </KeyboardAvoidingView>
         </SafeAreaView>
     );
 }
 
+// --- Stylesheet ---
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#fff' },
-    title: { fontSize: 24, fontWeight: 'bold', padding: 15, textAlign: 'center' },
-    dropdown: { marginBottom: 15 },
+    container: {
+        flex: 1,
+        padding: 16,
+        backgroundColor: '#f5f5f5', // Light grey background for a modern look
+    },
+    keyboardAvoidingView: {
+        flex: 1,
+    },
+    title: {
+        marginTop: Platform.OS === 'ios' ? 0 : 20, // Adjust spacing for iOS SafeArea
+        fontSize: 24,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        color: '#1976D2', // Deep blue color
+        marginBottom: 20,
+    },
+    dropdown: {
+        marginBottom: 16,
+        borderColor: '#ccc',
+        borderRadius: 8,
+    },
+    dropdownContainer: {
+        borderColor: '#ccc',
+        borderRadius: 8,
+        zIndex: 2000, // Ensures the dropdown list is visually above other elements
+    },
     input: {
-        marginHorizontal: 15,
-        padding: 10,
         borderWidth: 1,
         borderColor: '#ccc',
-        borderRadius: 6,
-        marginBottom: 15,
+        borderRadius: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        marginBottom: 16,
+        backgroundColor: '#fff', // White background for input
+        fontSize: 16,
     },
     dateRow: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginBottom: 15,
-        paddingHorizontal: 15,
+        justifyContent: 'space-between',
+        marginBottom: 16,
     },
     datePickerButton: {
-        padding: 12,
+        flex: 1,
         borderWidth: 1,
-        borderColor: '#aaa',
-        borderRadius: 6,
-        minWidth: 140,
+        borderColor: '#ccc',
+        borderRadius: 8,
+        padding: 12,
+        marginHorizontal: 4,
         alignItems: 'center',
+        backgroundColor: '#fff',
     },
-    datePickerText: { fontSize: 14 },
+    datePickerText: {
+        color: '#555',
+        fontSize: 16,
+    },
     buttonsRow: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginBottom: 25,
-        paddingHorizontal: 15,
+        justifyContent: 'space-between',
+        marginBottom: 20,
     },
     button: {
-        backgroundColor: '#1976D2',
-        padding: 14,
-        borderRadius: 6,
         flex: 1,
+        backgroundColor: '#1976D2', // Primary blue
+        paddingVertical: 14,
+        borderRadius: 8,
+        alignItems: 'center',
         marginHorizontal: 5,
+        elevation: 2, // Android shadow
+        shadowColor: '#000', // iOS shadow
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
     },
-    clearButton: { backgroundColor: '#e0e0e0' },
-    buttonText: { color: 'white', textAlign: 'center', fontWeight: '600' },
-    statsTitle: { fontSize: 20, fontWeight: 'bold', marginHorizontal: 15, marginBottom: 10 },
-    statBox: {
-        marginHorizontal: 15,
+    clearButton: {
+        backgroundColor: '#e0e0e0', // Light grey for clear button
+    },
+    buttonText: {
+        color: 'white',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    statsTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
         marginBottom: 15,
-        padding: 12,
-        backgroundColor: '#f5f5f5',
-        borderRadius: 8,
+        color: '#1976D2',
+        textAlign: 'center',
     },
-    statLabel: { fontWeight: 'bold', fontSize: 16, marginBottom: 6 },
-    statValue: { fontSize: 15, marginLeft: 10 },
-    statExplanation: { fontSize: 12, color: '#555', marginTop: 3 },
-    noResultsText: { textAlign: 'center', marginVertical: 40, fontSize: 16, color: '#777' },
+    statBox: {
+        marginBottom: 10,
+        backgroundColor: '#eaf4fd', // Very light blue for stat boxes
+        padding: 15,
+        borderRadius: 8,
+        borderLeftWidth: 5, // Left border as an accent
+        borderLeftColor: '#1976D2',
+    },
+    statLabel: {
+        fontWeight: 'bold',
+        fontSize: 15,
+        marginBottom: 5,
+        color: '#333',
+    },
+    statValue: {
+        fontSize: 18,
+        color: '#0d47a1', // Darker blue for emphasis
+        fontWeight: '600',
+    },
+    topBoroughItem: {
+        fontSize: 15,
+        paddingVertical: 2,
+        color: '#444',
+    },
+    listTitle: {
+        fontWeight: 'bold',
+        fontSize: 18,
+        marginTop: 25,
+        marginBottom: 15,
+        textAlign: 'center',
+        color: '#1976D2',
+    },
     entraveItem: {
-        backgroundColor: '#e3f2fd',
-        padding: 12,
+        backgroundColor: '#ffffff', // White background for each list item
+        padding: 15,
         borderRadius: 8,
-        marginHorizontal: 15,
+        marginBottom: 10,
+        borderLeftWidth: 4,
+        borderLeftColor: '#42A5F5', // Lighter blue accent
+        elevation: 1, // Android shadow
+        shadowColor: '#000', // iOS shadow
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 1,
     },
-    entraveTitle: { fontWeight: 'bold', fontSize: 16, marginBottom: 4 },
-    entraveDetails: { fontSize: 14, color: '#333' },
+    entraveTitle: {
+        fontWeight: 'bold',
+        fontSize: 17,
+        marginBottom: 5,
+        color: '#333',
+    },
+    noResultsText: {
+        textAlign: 'center',
+        marginTop: 30,
+        color: '#777',
+        fontSize: 16,
+        paddingHorizontal: 20,
+    },
+    promptText: {
+        marginTop: 50,
+        textAlign: 'center',
+        color: '#777',
+        fontSize: 16,
+        paddingHorizontal: 20,
+    },
+    loadingText: {
+        marginTop: 10,
+        fontSize: 16,
+        color: '#555',
+    },
+    errorText: {
+        marginTop: 20,
+        fontSize: 16,
+        color: 'red',
+        textAlign: 'center',
+        paddingHorizontal: 20,
+        fontWeight: 'bold',
+    },
+    retryButton: {
+        marginTop: 20,
+        backgroundColor: '#1976D2',
+        paddingVertical: 12,
+        paddingHorizontal: 25,
+        borderRadius: 8,
+        alignSelf: 'center',
+    },
 });

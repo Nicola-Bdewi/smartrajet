@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "Smartrajet",
+    "slug": "Smartrajet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "smartrajet",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.app.smartrajet"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "@maplibre/maplibre-react-native"
+      ],
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "appRoot": "Smartrajet/app/(tabs)/index.tsx"
+      },
+      "eas": {
+        "projectId": "54499fab-eb2e-4b5e-91ef-d87f4394d5ff"
+      },
+      "IMPACTS_URL": "https://donnees.montreal.ca/api/3/action/datastore_search_sql?sql=SELECT * FROM \"a2bc8014-488c-495d-941b-e7ae1999d1bd\"",
+      "ENTRAVES_URL": "https://donnees.montreal.ca/api/3/action/datastore_search_sql?sql=SELECT * FROM \"cc41b532-f12d-40fb-9f55-eb58c9a2b12b\"",
+      "ORS_KEY": "5b3ce3597851110001cf6248f0026a659ea4487181781678091e0f14",
+      "OPENROUTESERVICE_API":"5b3ce3597851110001cf6248f0026a659ea4487181781678091e0f14"
+    }
+  }
+}

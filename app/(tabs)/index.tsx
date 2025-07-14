@@ -6,24 +6,24 @@ import {
     Text,
     TouchableOpacity,
     ActivityIndicator,
-    SafeAreaView, Dimensions
+    SafeAreaView,
+    Dimensions,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { WebView } from 'react-native-webview';
-import { saveAddress } from '@/services/addressService';
 import { useConstructionData } from '@/utils/useConstructionData';
 import { useAutocomplete } from '@/utils/useAutocomplete';
 import { useHtmlBuilder } from '@/utils/useHtmlBuilder';
-import {useRouter} from 'expo-router';
+import { useRouter } from 'expo-router';
 import {
     requestPermissions,
-    configureNotificationHandler
+    configureNotificationHandler,
 } from '@/utils/notifications';
 import { registerBackgroundTask } from '@/utils/backgroundTasks';
 import { styles } from '@/styles/styles';
-import {initDb} from "@/utils/db";
+import { initDb } from '@/utils/db';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FAB, Provider as PaperProvider, Card, Button } from 'react-native-paper';
+import { Button, Provider as PaperProvider } from 'react-native-paper';
 import Animated, {
     useSharedValue,
     useAnimatedStyle,
@@ -37,10 +37,11 @@ export default function MapScreen() {
     const [activeInput, setActiveInput] = useState<'from' | 'to' | null>(null);
     const [fromCoord, setFromCoord] = useState<[number, number] | null>(null);
     const [toCoord, setToCoord] = useState<[number, number] | null>(null);
-    const [distanceThreshold, setDistanceThreshold] = useState(100); // meters
+    const [distanceThreshold, setDistanceThreshold] = useState(100);
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const [visible, setVisible] = useState(false);
+
     const opacity = useSharedValue(0);
     const translateY = useSharedValue(-20);
 
@@ -64,17 +65,12 @@ export default function MapScreen() {
         initDb();
     }, []);
 
-    type RootStackParamList = {
-        Map: undefined;
-        SavedAddresses: undefined;
-    };
+    const screenHeight = Dimensions.get('window').height;
 
     const animatedStyle = useAnimatedStyle(() => ({
         opacity: opacity.value,
         transform: [{ translateY: translateY.value }],
     }));
-
-    const screenHeight = Dimensions.get('window').height;
 
     const toggle = () => {
         const toVisible = !visible;
@@ -87,105 +83,106 @@ export default function MapScreen() {
         <PaperProvider>
             <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
                 <View style={styles.floatingButton}>
-                    <Button mode="contained" onPress={toggle} buttonColor="#1976D2" textColor="#ffffff">
+                    <Button
+                        mode="contained"
+                        onPress={toggle}
+                        buttonColor="#1976D2"
+                        textColor="#ffffff"
+                    >
                         {visible ? 'Hide' : 'Show'}
                     </Button>
                 </View>
-                {/* Map filling background with conditional ActivityIndicator */}
+
                 {loadingHtml ? (
                     <ActivityIndicator style={{ flex: 1 }} size="large" color="#00ff00" />
                 ) : (
                     <WebView originWhitelist={['*']} source={{ html }} style={{ flex: 1 }} />
                 )}
-                {/* Button to navigate to saved-addresses management */}
+
                 <View style={[styles.floatingBtnContainer, { bottom: insets.bottom + 10 }]}>
-                    <Button textColor="#1976D2" mode="outlined" onPress={() => router.push('/SavedAddressesScreen')}>
-                        Manage Saved Addresses
+                    <Button
+                        buttonColor="#1976D2"
+                        textColor="white"
+                        mode="contained"
+                        onPress={() => router.push('/SavedAddressesScreen')}
+                    >
+                        Explorer les chantiers
                     </Button>
                 </View>
-                <Animated.View
-                    style={[{ flex: 1, width: '100%', position: 'absolute', height: screenHeight * 0.1,top: screenHeight * 0.05 }, animatedStyle]}
-                    pointerEvents={visible ? 'auto' : 'none'}
-                >
-            <View style={styles.searchContainer}>
-                <TextInput
-                    placeholder="From address"
-                    value={fromQuery}
-                    onChangeText={t => {
-                        setFromQuery(t);
-                        setActiveInput('from');
-                        setFromCoord(null);
-                    }}
-                    style={styles.input}
-                />
-                    <FAB
-                        icon="plus"
-                        size="small"
-                        color="white"
-                        style={styles.fab}
-                        onPress={() => {
-                            if (toCoord) saveAddress(toQuery, toCoord);
-                            else alert('Please select a valid From address');
-                        }}
-                    />
-                <TextInput
-                    placeholder="To address"
-                    value={toQuery}
-                    onChangeText={t => {
-                        setToQuery(t);
-                        setActiveInput('to');
-                        setToCoord(null);
-                    }}
-                    style={styles.input}
-                />
-                    <FAB
-                        icon="plus"
-                        size="small"
-                        color="white"
-                        style={styles.fabTwo}
-                        onPress={() => {
-                            if (fromCoord) saveAddress(fromQuery, fromCoord);
-                            else alert('Please select a valid From address');
-                        }}
-                    />
-                <View style={styles.sliderContainer}>
-                    <Text>Rayon d'affichage des entraves : {distanceThreshold} m</Text>
-                    <Slider
-                        minimumValue={50}
-                        maximumValue={600}
-                        step={5}
-                        value={distanceThreshold}
-                        onValueChange={setDistanceThreshold}
-                    />
-                </View>
-                {suggestions.length > 0 && (
-                    <FlatList
-                        data={suggestions}
-                        keyExtractor={item => item.properties.id}
-                        style={styles.suggestionsList}
-                        renderItem={({ item }) => (
-                            <TouchableOpacity
-                                onPress={() => {
-                                    if (activeInput === 'from') {
-                                        setFromQuery(item.properties.label);
-                                        setFromCoord(item.geometry.coordinates);
-                                    } else {
-                                        setToQuery(item.properties.label);
-                                        setToCoord(item.geometry.coordinates);
-                                    }
-                                    setActiveInput(null);
-                                }}
-                            >
-                                <Text style={styles.suggestion}>{item.properties.label}</Text>
-                            </TouchableOpacity>
-                        )}
-                    />
-                )}
 
-            </View>
-        </Animated.View>
+                {/* Overlay with pointerEvents logic */}
+                <Animated.View
+                    style={[
+                        {
+                            position: 'absolute',
+                            width: '100%',
+                            height: screenHeight * 0.8,
+                            top: screenHeight * 0.03,
+                        },
+                        animatedStyle,
+                    ]}
+                    // box-none lets touches pass through the Animated.View itself but children can capture touches
+                    pointerEvents={visible ? 'box-none' : 'none'}
+                >
+                    {/* Interactive container: this catches touches */}
+                    <View style={styles.searchContainer} pointerEvents="auto">
+                        <TextInput
+                            placeholder="From address"
+                            value={fromQuery}
+                            onChangeText={t => {
+                                setFromQuery(t);
+                                setActiveInput('from');
+                                setFromCoord(null);
+                            }}
+                            style={styles.input}
+                        />
+                        <TextInput
+                            placeholder="To address"
+                            value={toQuery}
+                            onChangeText={t => {
+                                setToQuery(t);
+                                setActiveInput('to');
+                                setToCoord(null);
+                            }}
+                            style={styles.input}
+                        />
+                        <View style={styles.sliderContainer}>
+                            <Text>Rayon d'affichage des entraves : {distanceThreshold} m</Text>
+                            <Slider
+                                minimumValue={50}
+                                maximumValue={600}
+                                step={5}
+                                value={distanceThreshold}
+                                onValueChange={setDistanceThreshold}
+                            />
+                        </View>
+
+                        {suggestions.length > 0 && (
+                            <FlatList
+                                data={suggestions}
+                                keyExtractor={item => item.properties.id}
+                                style={styles.suggestionsList}
+                                renderItem={({ item }) => (
+                                    <TouchableOpacity
+                                        onPress={() => {
+                                            if (activeInput === 'from') {
+                                                setFromQuery(item.properties.label);
+                                                setFromCoord(item.geometry.coordinates);
+                                            } else {
+                                                setToQuery(item.properties.label);
+                                                setToCoord(item.geometry.coordinates);
+                                            }
+                                            setActiveInput(null);
+                                        }}
+                                    >
+                                        <Text style={styles.suggestion}>{item.properties.label}</Text>
+                                    </TouchableOpacity>
+                                )}
+                            />
+                        )}
+                    </View>
+                </Animated.View>
             </SafeAreaView>
         </PaperProvider>
     );
 }
-
